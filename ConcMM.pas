@@ -4,7 +4,7 @@ unit ConcMM;
 
 interface
 
-{.$Include ConcMM_User.inc}
+{$Include ConcMM_User.inc}
 
 {$Include ConcMM_Defaults.inc}
 
@@ -164,9 +164,8 @@ end;
 
 function BitmapFindFree(const bitmap: PBitmapBase; const BitCount: PtrUInt): integer;
 var
-  i: Integer;
+  i, idx: Cardinal;
   cur: BitmapBase;
-  idx: Cardinal;
 begin
   Assert(BitCount mod BitSizeOf(BitmapBase) = 0);
 
@@ -737,7 +736,7 @@ var
 
   procedure AsyncReleaseAdd(const pool: PPoolInstance; const StartOfPage: Pointer; const Size: PtrUInt);
   var
-    free, listHead: PAsyncFreeHeader;
+    free: PAsyncFreeHeader;
   begin
     free:= PAsyncFreeHeader(StartOfPage);
     free^.AllocSize:= Size;
@@ -762,9 +761,8 @@ var
     InterlockedSub(pool^.Status.TotalAllocated, freed);
   end;
 
-  function AsyncReleaseThreadProc(parameter: pointer): ptrint;
+  function AsyncReleaseThreadProc({%H-}parameter: pointer): ptrint;
   var
-    list: PAsyncFreeHeader;
     i: Integer;
   begin
     Result:= 0;
@@ -776,8 +774,6 @@ var
   end;
 
   procedure AsyncReleaseInitialize;
-  var
-    LThreadID: DWORD;
   begin
     gAsyncReleaseThreadTerminate:= BasicEventCreate(nil, true, false, '');
     gAsyncReleaseThread:= BeginThread(@AsyncReleaseThreadProc);
@@ -929,7 +925,7 @@ function CMMGetHeapStatus: THeapStatus;
 var
   i: Integer;
 begin
-  FillChar(Result, sizeof(Result), 0);
+  FillChar(Result{%H-}, sizeof(Result), 0);
   for i:= 0 to high(gPagePools) do begin
     {$If CMM_ASYNC_PAGE_RELEASE}
       AsyncReleaseFreeChain(gPagePools[i]);
@@ -944,7 +940,7 @@ function CMMGetFPCHeapStatus: TFPCHeapStatus;
 var
   i: Integer;
 begin
-  FillChar(Result, sizeof(Result), 0);
+  FillChar(Result{%H-}, sizeof(Result), 0);
   for i:= 0 to high(gPagePools) do begin
     {$If CMM_ASYNC_PAGE_RELEASE}
       AsyncReleaseFreeChain(gPagePools[i]);
@@ -961,7 +957,6 @@ procedure CMMInstall;
 var
   newMM: TMemoryManager;
   i: Integer;
-  pool: PPoolInstance;
 begin
   if gCMMInstalled then
     Exit;
@@ -975,7 +970,7 @@ begin
   {$IfEnd}
 
   GetMemoryManager(gOldMemoryManager);
-  FillChar(newMM, SizeOf(newMM), 0);
+  FillChar({%H-}newMM, SizeOf(newMM), 0);
   newMM.Getmem:= @CMMGetMem;
   newMM.Freemem:= @CMMFreeMem;
   newMM.FreememSize:= @CMMFreememSize;
@@ -991,7 +986,6 @@ end;
 procedure CMMUninstall;
 var
   i: Integer;
-  pool: PPoolInstance;
 begin
   if not gCMMInstalled then
     Exit;

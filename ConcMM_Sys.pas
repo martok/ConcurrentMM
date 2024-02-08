@@ -5,7 +5,7 @@ unit ConcMM_Sys;
 interface
 
 function CMMSysPageAlloc(size: ptruint): pointer;
-procedure CMMSysPageFree(p: pointer; size: ptruint);
+procedure CMMSysPageFree(p: pointer; {%H-}size: ptruint);
 
 implementation
 
