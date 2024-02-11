@@ -331,6 +331,7 @@ begin
   pool:= nil;
 end;
 
+{$push}{$Q-}{$R-}
 function PoolGetThreadTag: PtrUInt;
 var
   tid: TThreadID;
@@ -341,6 +342,7 @@ begin
   tid:= tid xor RorDWord(tid, 16);
   Result:= tid and (CONCURRENCY-1);
 end;
+{$pop}
 
 function PoolGetThread: PPoolInstance;
 begin
