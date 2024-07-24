@@ -332,15 +332,35 @@ begin
 end;
 
 {$push}{$Q-}{$R-}
+
+procedure lfsr_xorshift(var lfsr: Word); inline;
+begin
+  lfsr:= lfsr xor (lfsr >> 7);
+  lfsr:= lfsr xor (lfsr << 9);
+  lfsr:= lfsr xor (lfsr >> 13);
+end;
+
 function PoolGetThreadTag: PtrUInt;
 var
   tid: TThreadID;
+  lfsr: Word;
+  pid, tag: PtrUInt;
+  i: Integer;
 begin
-  tid:= GetCurrentThreadId;
-  tid:= tid xor RorDWord(tid, 7);
-  tid:= tid * 314159265;
-  tid:= tid xor RorDWord(tid, 16);
-  Result:= tid and (CONCURRENCY-1);
+  tid:= GetCurrentThreadId;   
+  pid:= GetProcessID;
+
+  lfsr:= tid xor (tid shr 16) xor pid xor (pid shr 16);
+
+  for i:= 1 to 16 do
+    lfsr_xorshift(lfsr);
+
+  tag:= 0;
+  for i:= 1 to CMM_CONCURRENCY_POT do begin
+    tag:= (tag << 1) or (lfsr and 1);
+    lfsr_xorshift(lfsr);
+  end;
+  Result:= tag;
 end;
 {$pop}
 
