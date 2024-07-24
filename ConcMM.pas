@@ -80,10 +80,15 @@ type
   end;
   {$If SizeOf(TSmallHeader) mod 16 <> 0}{$Fatal Alignment error}{$IfEnd}
 
-  TSmallAllocation = record
+  TSmallAllocSlice = record
     Lock: TRTLCriticalSection;
-    SliceMaxSize: array[0..SMALL_SLICE_COUNT - 1] of PtrUInt;
-    SliceFreeList: array[0..SMALL_SLICE_COUNT - 1] of PSmallSlice;
+    MaxSize: PtrUInt;
+    FreeList: PSmallSlice;
+  end;
+
+  {$If SMALL_SLICE_COUNT > high(Byte)}{$Fatal SMALL_SLICE_COUNT must fit in a Byte}{$IfEnd}
+  TSmallAllocation = record
+    Slices: array[0..SMALL_SLICE_COUNT - 1] of TSmallAllocSlice;
   end;
 
   THugeHeader = record
@@ -304,25 +309,28 @@ begin
   pool^.QuantumAlloc.EndOfLast:= PByte(pool^.QuantumAlloc.Space) + sizeof(TQuantumElement) * QUANTUM_COUNT;
   pool^.Status.TotalAllocated += sizeof(TQuantumElement) * QUANTUM_COUNT;
   // Small
-  InitCriticalSection(pool^.SmallAlloc.Lock);
   sz:= SMALL_MIN;
   i:= 0;
-  while sz <= SMALL_MAX do begin
-    pool^.SmallAlloc.SliceMaxSize[i]:= sz;
+  while sz <= SMALL_MAX do begin                   
+    InitCriticalSection(pool^.SmallAlloc.Slices[i].Lock);
+    pool^.SmallAlloc.Slices[i].MaxSize:= sz;
     if sz < SMALL_SPLIT then
       inc(sz, SMALL_STEP_1)
     else
       inc(sz, SMALL_STEP_2);
     inc(i);
   end;
-  Assert(pool^.SmallAlloc.SliceMaxSize[i-1] = SMALL_MAX);
+  Assert(pool^.SmallAlloc.Slices[i-1].MaxSize = SMALL_MAX);
   Assert(i = SMALL_SLICE_COUNT);
 end;
 
 procedure PoolFinalize(var pool: PPoolInstance);
+var
+  i: Integer;
 begin
   // Small
-  DoneCriticalSection(pool^.SmallAlloc.Lock);
+  for i:= 0 to SMALL_SLICE_COUNT - 1 do
+    DoneCriticalSection(pool^.SmallAlloc.Slices[i].Lock);
   // Quantum
   CMMSysPageFree(pool^.QuantumAlloc.Free, sizeof(TQuantumBitmap));
   CMMSysPageFree(pool^.QuantumAlloc.Space, sizeof(TQuantumElement) * QUANTUM_COUNT);
@@ -481,7 +489,7 @@ var
   headerArray: PSmallHeader;
   i: Integer;
 begin
-  userSize:= pool^.SmallAlloc.SliceMaxSize[allocIndex];
+  userSize:= pool^.SmallAlloc.Slices[allocIndex].MaxSize;
   blockSize:= Sizeof(TSmallHeader) + userSize;
   available:= TargetSize - SizeOf(TSmallSlice);
   // how many blocks fit in the requested slice size?
@@ -522,8 +530,8 @@ begin
   listHead:= nil;
   allocIdx:= 0;
   for i:= 0 to SMALL_SLICE_COUNT - 1 do begin
-    if allocSize <= pool^.SmallAlloc.SliceMaxSize[i] then begin
-      listHead:= @pool^.SmallAlloc.SliceFreeList[i];
+    if allocSize <= pool^.SmallAlloc.Slices[i].MaxSize then begin
+      listHead:= @pool^.SmallAlloc.Slices[i].FreeList;
       allocIdx:= i;
       break;
     end;
@@ -532,8 +540,8 @@ begin
 
   slice:= nil;
   freeHeader:= nil;
-  blockSize:= pool^.SmallAlloc.SliceMaxSize[allocIdx] + SizeOf(TSmallHeader);
-  EnterCriticalSection(pool^.SmallAlloc.Lock);
+  blockSize:= pool^.SmallAlloc.Slices[allocIdx].MaxSize + SizeOf(TSmallHeader);
+  EnterCriticalSection(pool^.SmallAlloc.Slices[allocIdx].Lock);
   slice:= listHead^;
 
   if slice <> nil then begin
@@ -570,7 +578,7 @@ begin
     if listHead^ <> nil then
       listHead^^.PrevWithFree:= nil;
   end;
-  LeaveCriticalSection(pool^.SmallAlloc.Lock);
+  LeaveCriticalSection(pool^.SmallAlloc.Slices[allocIdx].Lock);
 
   InterlockedAdd(pool^.Status.TotalUsed, Size);
 end;
@@ -582,15 +590,16 @@ var
   slice: PSmallSlice;
   blockSize, sliceAlloc: PtrUInt;
   listHead: PPSmallSlice;
+  allocIdx: Integer;
 begin
   header:= PSmallHeader(RightAlign(P, SizeOf(TSmallHeader)));
   pool:= FlagsSplitPtr(header^.OwnerPoolAndFlags);
-  blockSize:= pool^.SmallAlloc.SliceMaxSize[header^.AllocIndex] + SizeOf(TSmallHeader);
+  allocIdx:= header^.AllocIndex;
+  blockSize:= pool^.SmallAlloc.Slices[allocIdx].MaxSize + SizeOf(TSmallHeader);
 
   slice:= PSmallSlice(PByte(header) - header^.IndexInSlice * blockSize) - 1;
-
-  EnterCriticalSection(pool^.SmallAlloc.Lock);
-  listHead:= @pool^.SmallAlloc.SliceFreeList[header^.AllocIndex];
+  EnterCriticalSection(pool^.SmallAlloc.Slices[allocIdx].Lock);
+  listHead:= @pool^.SmallAlloc.Slices[allocIdx].FreeList;
 
   // unmark
   FlagsClearPtr(header^.OwnerPoolAndFlags, HFLAG_USED);
@@ -622,7 +631,7 @@ begin
     MemoryFreeForPool(slice, sliceAlloc, pool);
   end;
 
-  LeaveCriticalSection(pool^.SmallAlloc.Lock);
+  LeaveCriticalSection(pool^.SmallAlloc.Slices[allocIdx].Lock);
 end;
 
 procedure SmallRealloc(var p: Pointer; const newSize: PtrUInt);
@@ -638,7 +647,7 @@ begin
   if newSize = header^.UserSize then
     Exit;
 
-  maxSize:= pool^.SmallAlloc.SliceMaxSize[header^.AllocIndex];
+  maxSize:= pool^.SmallAlloc.Slices[header^.AllocIndex].MaxSize;
 
   // Upsize or Downsize?
   if newSize > header^.UserSize then begin
