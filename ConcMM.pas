@@ -711,12 +711,14 @@ procedure HugeFree(const P: Pointer);
 var
   header: PHugeHeader;
   pool: PPoolInstance;
+  allocSize: PtrUInt;
 begin
   header:= PHugeHeader(RightAlign(P, SizeOf(THugeHeader)));
   pool:= FlagsSplitPtr(header^.OwnerPoolAndFlags);
   InterlockedSub(pool^.Status.TotalUsed, header^.UserSize);
-  MemoryBeforeRelease(header, header^.AllocSize);
-  MemoryFreeForPool(header, header^.AllocSize, pool);
+  allocSize:= header^.AllocSize;
+  MemoryBeforeRelease(header, allocSize);
+  MemoryFreeForPool(header, allocSize, pool);
 end;
 
 procedure HugeRealloc(var p: Pointer; const newSize: PtrUInt);
