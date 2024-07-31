@@ -27,15 +27,20 @@ const
   QUANTUM_SIZE                  = 16;
   QUANTUM_COUNT                 = PAGE_BITS * 1;
 
-  SMALL_MIN                     = QUANTUM_SIZE * 2;
-  SMALL_SPLIT                   = 512;
-  SMALL_MAX                     = PAGE * 2;
-  SMALL_STEP_1                  = 16;
-  SMALL_STEP_2                  = 256;
-  SMALL_SLICE_COUNT             = (SMALL_SPLIT - SMALL_MIN) div SMALL_STEP_1 +
-                                  (SMALL_MAX - SMALL_SPLIT) div SMALL_STEP_2 + 1;
   SMALL_ALLOC_SIZE              = PAGE * 16;
-  SMALL_MAX_BLOCKS              = high(Byte) + 1;
+  SMALL_MAX_BLOCKS              = 1024;
+
+  // Slice definition: starting at SMALL_MIN, increment by SMALL_n_STEP until SMALL_n_SPLIT, ending at SMALL_MAX
+  SMALL_MIN                     = QUANTUM_SIZE * 2;
+  SMALL_1_STEP                  = 16;
+  SMALL_1_SPLIT                 = 512;
+  SMALL_2_STEP                  = 256;
+  SMALL_2_SPLIT                 = PAGE * 2;
+  SMALL_3_STEP                  = 2048;
+  SMALL_MAX                     = PAGE * 12;
+  SMALL_SLICE_COUNT             = (SMALL_1_SPLIT - SMALL_MIN) div SMALL_1_STEP +
+                                  (SMALL_2_SPLIT - SMALL_1_SPLIT) div SMALL_2_STEP +
+                                  (SMALL_MAX - SMALL_2_SPLIT) div SMALL_3_STEP + 1;
 
 type
   PBitmapBase = ^BitmapBase;
@@ -71,10 +76,11 @@ type
   end;
   {$If SizeOf(TSmallSlice) mod 32 <> 0}{$Fatal Alignment error}{$IfEnd}
 
+  {$If SMALL_MAX_BLOCKS - 1 > high(Word)}{$Fatal SMALL_MAX_BLOCKS must fit in a Word}{$IfEnd}
   TSmallHeader = record
-    __pad: array[0..16 - 2 * SizeOf(Byte) - SizeOf(Word) - SizeOf(PoolMaskPtr) - 1] of byte;
+    __pad: array[0..16 - SizeOf(Byte) - 2 * SizeOf(Word) - SizeOf(PoolMaskPtr) - 1] of byte;
     AllocIndex: Byte;
-    IndexInSlice: Byte;
+    IndexInSlice: Word;
     UserSize: Word;
     OwnerPoolAndFlags: PoolMaskPtr;
   end;
@@ -86,7 +92,7 @@ type
     FreeList: PSmallSlice;
   end;
 
-  {$If SMALL_SLICE_COUNT > high(Byte)}{$Fatal SMALL_SLICE_COUNT must fit in a Byte}{$IfEnd}
+  {$If SMALL_SLICE_COUNT - 1 > high(Byte)}{$Fatal SMALL_SLICE_COUNT must fit in a Byte}{$IfEnd}
   TSmallAllocation = record
     Slices: array[0..SMALL_SLICE_COUNT - 1] of TSmallAllocSlice;
   end;
@@ -315,10 +321,12 @@ begin
   while sz <= SMALL_MAX do begin                   
     InitCriticalSection(pool^.SmallAlloc.Slices[i].Lock);
     pool^.SmallAlloc.Slices[i].MaxSize:= sz;
-    if sz < SMALL_SPLIT then
-      inc(sz, SMALL_STEP_1)
+    if sz < SMALL_1_SPLIT then
+      inc(sz, SMALL_1_STEP)
+    else if sz < SMALL_2_SPLIT then
+      inc(sz, SMALL_2_STEP)
     else
-      inc(sz, SMALL_STEP_2);
+      inc(sz, SMALL_3_STEP);
     inc(i);
   end;
   Assert(pool^.SmallAlloc.Slices[i-1].MaxSize = SMALL_MAX);
