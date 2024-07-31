@@ -34,8 +34,8 @@ const
   SMALL_STEP_2                  = 256;
   SMALL_SLICE_COUNT             = (SMALL_SPLIT - SMALL_MIN) div SMALL_STEP_1 +
                                   (SMALL_MAX - SMALL_SPLIT) div SMALL_STEP_2 + 1;
-  SMALL_ALLOC_SIZE              = PAGE * 4;
-  SMALL_MAX_BLOCKS              = 64;
+  SMALL_ALLOC_SIZE              = PAGE * 16;
+  SMALL_MAX_BLOCKS              = high(Byte) + 1;
 
 type
   PBitmapBase = ^BitmapBase;
@@ -500,7 +500,7 @@ begin
   available:= alloc - SizeOf(TSmallSlice);
   count:= available div blockSize;
   Assert(count >= 1);
-  Assert(count < high(TSmallHeader.IndexInSlice));
+  Assert(count <= high(TSmallHeader.IndexInSlice));
 
   Result:= CMMSysPageAlloc(alloc);
   if not Assigned(Result) then
