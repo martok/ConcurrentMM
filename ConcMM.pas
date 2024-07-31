@@ -129,6 +129,7 @@ function SmallSliceAlloc(const pool: PPoolInstance; const TargetSize: PtrUInt; c
 function HugeAlloc(const Size: PtrUInt; const OverAllocHint: PtrUInt = 0): Pointer; forward;
 {$If CMM_ASYNC_PAGE_RELEASE}
 procedure AsyncReleaseAdd(const pool: PPoolInstance; const StartOfPage: Pointer; const Size: PtrUInt); forward;
+function CMMSysPageAlloc(size: ptruint): pointer; forward;
 {$IfEnd}
 
 // Data structures
@@ -286,8 +287,8 @@ begin
   {$If CMM_ASYNC_PAGE_RELEASE}
     AsyncReleaseAdd(pool, P, size)
   {$Else}
-    InterlockedExchangeAdd(pool^.Status.TotalAllocated, PtrUInt(-size));
-    SysPageFree(P, size);
+    InterlockedSub(pool^.Status.TotalAllocated, size);
+    CMMSysPageFree(P, size);
   {$IfEnd}
 end;
 
@@ -801,16 +802,30 @@ var
     InterlockedSub(pool^.Status.TotalAllocated, freed);
   end;
 
-  function AsyncReleaseThreadProc({%H-}parameter: pointer): ptrint;
+  procedure AsyncReleaseFreeChains;
   var
     i: Integer;
   begin
-    Result:= 0;
-    while BasicEventWaitFor(CMM_ASYNC_PAGE_RELEASE_INTERVAL, gAsyncReleaseThreadTerminate) = 1 do begin
-      for i:= 0 to high(gPagePools) do begin
-        AsyncReleaseFreeChain(gPagePools[i]);
-      end;
+    for i:= 0 to high(gPagePools) do begin
+      AsyncReleaseFreeChain(gPagePools[i]);
     end;
+  end;
+
+  function AsyncReleaseThreadProc({%H-}parameter: pointer): ptrint;
+  begin
+    Result:= 0;
+    while BasicEventWaitFor(CMM_ASYNC_PAGE_RELEASE_INTERVAL, gAsyncReleaseThreadTerminate) = 1 do
+      AsyncReleaseFreeChains;
+  end;
+
+  function CMMSysPageAlloc(size: ptruint): pointer;
+  begin
+    // This and its forward hook the actual ConcMM_Sys.CMMSysPageAlloc so that we can compact and retry on failure
+    Result:= ConcMM_Sys.CMMSysPageAlloc(size);
+    if Assigned(Result) then
+      Exit;
+    AsyncReleaseFreeChains;
+    Result:= ConcMM_Sys.CMMSysPageAlloc(size);
   end;
 
   procedure AsyncReleaseInitialize;
