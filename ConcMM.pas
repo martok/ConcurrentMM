@@ -502,6 +502,8 @@ begin
   Assert(count < high(TSmallHeader.IndexInSlice));
 
   Result:= CMMSysPageAlloc(alloc);
+  if not Assigned(Result) then
+    Exit(nil);
   Result^.NextWithFree:= nil;
   Result^.PrevWithFree:= nil;
   Result^.BlocksInSlice:= count;
@@ -560,6 +562,8 @@ begin
   if freeHeader = nil then begin
     // did not find one and had no currently free slice, need a full new one
     slice:= SmallSliceAlloc(pool, SMALL_ALLOC_SIZE, allocIdx);
+    if not Assigned(slice) then
+      Exit(nil);
     freeHeader:= PSmallHeader(slice + 1);
     // install it as the new first one (can't have PrevWithFree or it would have had free)
     listHead^:= slice;
@@ -669,7 +673,8 @@ begin
     end else begin
       newP:= SmallAlloc(newSize, wantExtraAlloc);
     end;
-    MemoryRelocate(p, header^.UserSize, newP, newSize);
+    if Assigned(newP) then
+      MemoryRelocate(p, header^.UserSize, newP, newSize);
     SmallFree(P);
     p:= newP;
   end else begin
@@ -691,7 +696,7 @@ begin
   allocsize:= NextPageSize(Max(Size, OverAllocHint) + SizeOf(THugeHeader));
   Assert(allocsize > Size);
   header:= CMMSysPageAlloc(allocsize);
-  if header = nil then
+  if not Assigned(header) then
     Exit(nil);
   header^.AllocSize:= allocsize;
   header^.UserSize:= Size;
@@ -737,7 +742,8 @@ begin
 
     // Grow by 50% more, expecting a block that grew once will grow again
     newP:= HugeAlloc(newSize, header^.UserSize + header^.UserSize div 2);
-    MemoryRelocate(p, header^.UserSize, newP, newSize);
+    if Assigned(newP) then
+      MemoryRelocate(p, header^.UserSize, newP, newSize);
     HugeFree(P);
     p:= newP;
   end else begin
@@ -749,8 +755,9 @@ begin
     end;
 
     // reallocate new, this may be of any Allocation unit
-    newP:= CMMGetMem(newSize);
-    MemoryRelocate(p, header^.UserSize, newP, newSize);
+    newP:= CMMGetMem(newSize);    
+    if Assigned(newP) then
+      MemoryRelocate(p, header^.UserSize, newP, newSize);
     HugeFree(P);
     p:= newP;
   end;
@@ -925,11 +932,10 @@ begin
 
   // No special case, move to new Allocation
   Result:= CMMGetMem(Size);
-  if Result<>nil then begin
+  if Assigned(Result) then
     MemoryRelocate(p, oldSize, Result, Size);
-    CMMFreeMem(p);
-    p:= Result;
-  end;
+  CMMFreeMem(p);
+  p:= Result;
 end;
 
 function CMMMemSize(p: pointer): ptruint;
