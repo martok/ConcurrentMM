@@ -781,6 +781,7 @@ var
 {$If CMM_ASYNC_PAGE_RELEASE}
   var
     gAsyncReleaseThread: TThreadID;
+    gAsyncReleaseThreadReady: PEventState;
     gAsyncReleaseThreadTerminate: PEventState;
 
   procedure AsyncReleaseAdd(const pool: PPoolInstance; const StartOfPage: Pointer; const Size: PtrUInt);
@@ -822,6 +823,8 @@ var
   function AsyncReleaseThreadProc({%H-}parameter: pointer): ptrint;
   begin
     Result:= 0;
+    // signal ready to main thread
+    BasicEventSetEvent(gAsyncReleaseThreadReady);
     while BasicEventWaitFor(CMM_ASYNC_PAGE_RELEASE_INTERVAL, gAsyncReleaseThreadTerminate) = 1 do
       AsyncReleaseFreeChains;
   end;
@@ -839,8 +842,12 @@ var
   procedure AsyncReleaseInitialize;
   begin
     gAsyncReleaseThreadTerminate:= BasicEventCreate(nil, true, false, '');
+    gAsyncReleaseThreadReady:= BasicEventCreate(nil, true, false, '');
     gAsyncReleaseThread:= BeginThread(@AsyncReleaseThreadProc);
     ThreadSetPriority(gAsyncReleaseThread, -10);
+    // Starting a thread contains a few allocations which the old manager must do, so wait here until that has happened
+    BasicEventWaitFor(INFINITE, gAsyncReleaseThreadReady);
+    BasicEventDestroy(gAsyncReleaseThreadReady);
   end;
 
   procedure AsyncReleaseFinalize;
@@ -1028,6 +1035,7 @@ begin
   end;
 
   {$If CMM_ASYNC_PAGE_RELEASE}
+    // Start with old MM
     AsyncReleaseInitialize;
   {$IfEnd}
 
@@ -1054,6 +1062,7 @@ begin
   SetMemoryManager(gOldMemoryManager);
 
   {$If CMM_ASYNC_PAGE_RELEASE}
+    // Release with restored old MM
     AsyncReleaseFinalize;
   {$IfEnd}
 
